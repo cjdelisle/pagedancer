@@ -13,101 +13,156 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "PageDancer.h"
+#include "test/Syscalls.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/syscall.h>
 #include <string.h>
-#include <stdarg.h>
-#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <assert.h>
+
+#define __USE_MISC
+#include <sys/mman.h>
 
 typedef void (* TestFunc)(void* context, struct PageDancer* pd);
+
+enum Exit {
+    Exit_SEGFAULT,
+    Exit_SIGSYS,
+    Exit_OK,
+    Exit_OTHER,
+    Exit_OTHERSIG,
+    Exit_ERRCODE
+};
 
 struct TestCase
 {
     TestFunc func;
     char* name;
+    enum Exit expect;
+};
+
+struct ChildContext
+{
+    int retVal;
 };
 
 struct Context
 {
     const struct TestCase* can;
-    int retVal;
+    struct ChildContext* cc;
 };
 
 static void basic(void* context, struct PageDancer* pd)
 {
-    struct Context* ctx = (struct Context*) context;
-    ctx->retVal = 1;
+    struct ChildContext* ctx = (struct ChildContext*) context;
+    ctx->retVal = 0;
 }
 
+// Expect an error code return because this doesn't set retVal to 0.
+static void doNothing(void* context, struct PageDancer* pd)
+{
+}
+
+// sigsys
 static void attemtDirectSyscall(void* context, struct PageDancer* pd)
 {
-    printf("hax\n"); // sigsys
+    printf("hax\n");
 }
 
+// segfault
 static void attemptPdSyscall(void* context, struct PageDancer* pd)
 {
-    pd->syscall(__NR_write, 1, "hax\n", 5); // segmentation fault
+    pd->syscall(__NR_write, 1, "hax\n", 5);
 }
 
 static const struct TestCase TEST_CASES[] = {
-    { .func = basic, .name = "basic" },
-    { .func = attemtDirectSyscall, .name = "attemtDirectSyscall" },
-    { .func = attemptPdSyscall, .name = "attemptPdSyscall" },
+    { .func = basic, .name = "basic", .expect = Exit_OK },
+    { .func = doNothing, .name = "doNothing", .expect = Exit_ERRCODE },
+    { .func = attemtDirectSyscall, .name = "attemtDirectSyscall", .expect = Exit_SIGSYS },
+    { .func = attemptPdSyscall, .name = "attemptPdSyscall", .expect = Exit_SEGFAULT },
 };
 
-static void xprintf(struct PageDancer* pd, const char* format, ...)
+static enum Exit getExitCause(int status)
 {
-    char buff[1024] = {0};
-    va_list args;
-    va_start(args, format);
-    vsnprintf(buff, 1023, format, args);
-    va_end(args);
-    pd->syscall(__NR_write, 1, buff, strlen(buff)+1);
-}
-
-static void xexit(struct PageDancer* pd, int num)
-{
-    pd->syscall(__NR_exit, num);
-}
-
-__attribute__((noreturn))
-static void xabort(struct PageDancer* pd)
-{
-    long pid = pd->syscall(__NR_gettid);
-    pd->syscall(__NR_tgkill, pid, pid, SIGABRT);
-    for (;;) {
-        ((char*)0)[0] = 0;
+    if (WIFEXITED(status)) {
+        if (WEXITSTATUS(status)) { return Exit_ERRCODE; }
+        return Exit_OK;
     }
+    if (WIFSIGNALED(status)) {
+        if (WTERMSIG(status) == SIGSEGV) { return Exit_SEGFAULT; }
+        if (WTERMSIG(status) == SIGSYS) { return Exit_SIGSYS; }
+        return Exit_OTHERSIG;
+    }
+    return Exit_OTHER;
 }
+
+static const char* EXIT_CAUSE_STR[] = {
+    "Exit_SEGFAULT",
+    "Exit_SIGSYS",
+    "Exit_OK",
+    "Exit_OTHER",
+    "Exit_OTHERSIG",
+    "Exit_ERRCODE"
+};
 
 static void privilegedMain(void* context, struct PageDancer* pd)
 {
     struct Context* ctx = (struct Context*) context;
     if (ctx->can) {
-        xprintf(pd, "%s %s\n", ctx->can->name, ctx->retVal ? "SUCCESS" : "FAIL");
-        xexit(pd, 0);
+        Syscalls_exit(pd, ctx->cc->retVal);
     }
     for (int i = 0; i < (int)(sizeof(TEST_CASES) / sizeof(*TEST_CASES)); i++) {
-        int pid = pd->syscall(__NR_fork);
+        ctx->can = &TEST_CASES[i];
+        long pid = pd->syscall(__NR_fork);
         if (pid < 0) {
-            xprintf(pd, "fork() -> %d\n", pid);
-            xabort(pd);
+            Syscalls_printf(pd, "fork() -> %d\n", pid);
+            Syscalls_abort(pd);
         }
         if (!pid) {
-            ctx->can = &TEST_CASES[i];
-            pd->nextCall = TEST_CASES[i].func;
-            xprintf(pd, "%s running\n", ctx->can->name);
-            pd->nextCallContext = ctx;
+            pd->nextCall = ctx->can->func;
+            pd->nextCallContext = ctx->cc;
             return;
+        } else {
+            Syscalls_printf(pd, "[%d] %s running\n", pid, ctx->can->name);
+            int status;
+            int ret = Syscalls_wait4(pd, pid, &status, 0, NULL);
+            if (ret < 0) {
+                Syscalls_printf(pd, "wait4() -> %d\n", ret);
+                Syscalls_abort(pd);
+            }
+            enum Exit ex = getExitCause(status);
+            Syscalls_printf(pd, "[%d] %s PASS [%s]\n", pid, ctx->can->name, EXIT_CAUSE_STR[ex]);
+            if (ex != ctx->can->expect) {
+                Syscalls_printf(pd, "%s FAIL [%s] expected [%s]\n",
+                        ctx->can->name, EXIT_CAUSE_STR[ex], EXIT_CAUSE_STR[ctx->can->expect]);
+            }
         }
     }
-    xexit(pd, 0);
+    Syscalls_exit(pd, 0);
 }
 
 int main()
 {
-    struct Context ctx = { .can = NULL };
-    PageDancer_begin(privilegedMain, &ctx);
+    struct Context* ctx = mmap(NULL,
+                               sizeof(struct Context),
+                               PROT_READ | PROT_WRITE,
+                               MAP_PRIVATE | MAP_ANONYMOUS,
+                               -1,
+                               0);
+    assert(ctx != MAP_FAILED);
+
+    struct ChildContext* childCtx = mmap(NULL,
+                                         sizeof(struct ChildContext),
+                                         PROT_READ | PROT_WRITE,
+                                         MAP_PRIVATE | MAP_ANONYMOUS,
+                                         -1,
+                                         0);
+    assert(childCtx != MAP_FAILED);
+    childCtx->retVal = -1;
+    ctx->cc = childCtx;
+
+    PageDancer_begin(privilegedMain, ctx, sizeof(struct Context));
 }

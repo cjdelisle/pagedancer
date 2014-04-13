@@ -12,8 +12,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef PageDancer_amd64_H
-#define PageDancer_amd64_H
+#ifndef Processor_amd64_H
+#define Processor_amd64_H
 
 // All processor specific code should be here.
 

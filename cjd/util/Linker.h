@@ -12,15 +12,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#ifndef Linker_H
+#define Linker_H
 
-<?js file.compilerArgs[file.compilerArgs.indexOf("cpp-output")] = "assembler-with-cpp"; ?>
+#define Linker_require(req) <?js file.links.push(req); ?>
 
-#define Processor_ASM_INIT
-#include "Processor.h"
-
-#define Processor_MKSYSCALL_NAME Syscall_make
-#define Processor_MKSYSCALL_PARAMS 6
-#include "Processor.h"
-
-#define Processot_ASM_FINI
-#include "Processor.h"
+#endif

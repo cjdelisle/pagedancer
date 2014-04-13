@@ -19,7 +19,7 @@
 
 #define _GNU_SOURCE // memmem()
 #include <string.h>
-
+#include <errno.h>
 #include <stdio.h>
 #include <sys/mman.h>
 #include <assert.h>
@@ -28,6 +28,7 @@ struct PageDancer_Secure
 {
     PageDancer_Function privilegedMain;
     void* mainContext;
+    unsigned long mainContextLength;
     PageDancer_Syscall syscall;
 };
 
@@ -54,8 +55,18 @@ static void callPrivileged(struct PageDancer_pvt* pd)
 
     // note we use the returned secPd rather than the evil one passed to us!
     if (!ret) {
+        secPd->syscall(__NR_mprotect,
+                       secPd->mainContext,
+                       secPd->mainContextLength,
+                       (PROT_READ | PROT_WRITE));
+
         pd->pub.syscall = secPd->syscall;
         secPd->privilegedMain(secPd->mainContext, &pd->pub);
+
+        secPd->syscall(__NR_mprotect,
+                       secPd->mainContext,
+                       secPd->mainContextLength,
+                       PROT_NONE);
     }
 
     for (;;) {
@@ -77,7 +88,9 @@ static void callPrivileged(struct PageDancer_pvt* pd)
 #define PageDancer_SEC_ZONE_SZ 2048
 
 __attribute__((noreturn))
-void PageDancer_begin(PageDancer_Function privilegedMain, void* privilegedContext)
+void PageDancer_begin(PageDancer_Function privilegedMain,
+                      void* mainContext,
+                      unsigned long mainContextLength)
 {
     unsigned char* ptr = mmap(NULL,
                               PageDancer_SEC_ZONE_SZ,
@@ -88,7 +101,10 @@ void PageDancer_begin(PageDancer_Function privilegedMain, void* privilegedContex
 
     struct PageDancer_Secure* secContext = (struct PageDancer_Secure*) ptr;
     secContext->privilegedMain = privilegedMain;
-    secContext->mainContext = privilegedContext;
+    secContext->mainContext = mainContext;
+    secContext->mainContextLength = mainContextLength;
+
+    if (mprotect(mainContext, mainContextLength, PROT_NONE)) { assert(0); }
 
     ptr = (unsigned char*) (&secContext[1]);
 
@@ -98,7 +114,7 @@ void PageDancer_begin(PageDancer_Function privilegedMain, void* privilegedContex
     union { PageDancer_Syscall func; void* data; } hax = { .data = ptr };
     secContext->syscall = hax.func;
 
-    mprotect(ptr, PageDancer_SEC_ZONE_SZ, PROT_NONE);
+    if (mprotect(secContext, PageDancer_SEC_ZONE_SZ, PROT_NONE)) { assert(0); }
 
     // This context is *NOT* protected, it can be arbitrarily modified!
     struct PageDancer_pvt pdp = {

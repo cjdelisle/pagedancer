@@ -12,11 +12,14 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef Processor_GLUE
-    #define Processor_GLUE(a,b) Processor__GLUE(a,b)
-    #define Processor__GLUE(a,b) Processor___GLUE(a,b)
-    #define Processor___GLUE(a,b) a ## b
-#endif
+#ifndef Processor_H
+#define Processor_H
+
+#define Processor_GLUE(a,b) Processor__GLUE(a,b)
+#define Processor__GLUE(a,b) Processor___GLUE(a,b)
+#define Processor___GLUE(a,b) a ## b
+
+#endif // The remainder of the file can be called more than once.
 
 #if defined(__amd64__) || \
     defined(__x86_64__) || \

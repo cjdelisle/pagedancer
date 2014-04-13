@@ -65,21 +65,21 @@ void SeccompRules_install(unsigned char* unprotectLoc,
 
         // protecting and unprotecting the secure space.
         LOAD(offsetof(struct seccomp_data, nr)),
-        FNE(__NR_mprotect), // if (nr != __NR_mprotect) fail
+        FNE(__NR_mprotect), // if (nr != __NR_mprotect) { fail }
 
         LOAD(offsetof(struct seccomp_data, args[0])),
-        FNE((long)secZone), // if (args[0] != secZone) fail
+        FNE((long)secZone), // if (args[0] != secZone) { fail }
 
         LOAD(offsetof(struct seccomp_data, args[1])),
-        FNE(secZoneLen), // if (args[1] != secZoneEnd) fail
+        FNE(secZoneLen), // if (args[1] != secZoneEnd) { fail }
 
         LOAD(offsetof(struct seccomp_data, args[2])),
-        SEQ(protectSecZone), // if (args[2] == protectSecZone) success (anyone can do this)
+        SEQ(protectSecZone), // if (args[2] == protectSecZone) { success, anyone can do this }
 
-        FNE(unprotectSecZone), // if (args[2] != unprotectSecZone) fail
+        FNE(unprotectSecZone), // if (args[2] != unprotectSecZone) { fail }
 
         LOAD(offsetof(struct seccomp_data, instruction_pointer)),
-        FNE((long)unprotectLoc), // if (ip != unprotectLoc) fail
+        FNE((long)unprotectLoc), // if (ip != unprotectLoc) { fail }
 
         RET(SECCOMP_RET_ALLOW)
     };

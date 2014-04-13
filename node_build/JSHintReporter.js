@@ -13,14 +13,20 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-<?js file.compilerArgs[file.compilerArgs.indexOf("cpp-output")] = "assembler-with-cpp"; ?>
+module.exports = {
+    reporter: function(res) {
+        var len = res.length;
+        var str = "";
 
-#define Processor_ASM_INIT
-#include "Processor.h"
+        res.forEach(function(r) {
+            var file = r.file;
+            var err = r.error;
 
-#define Processor_MKSYSCALL_NAME Syscall_make
-#define Processor_MKSYSCALL_PARAMS 6
-#include "Processor.h"
+            str += file + ":" + err.line + ":" + err.character + "  " + err.reason + "\n";
+        });
 
-#define Processot_ASM_FINI
-#include "Processor.h"
+        if (str) {
+            process.stdout.write(str + "\n" + len + " error" + ((len === 1) ? "" : "s") + "\n");
+        }
+    }
+};

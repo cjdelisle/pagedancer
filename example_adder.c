@@ -18,8 +18,11 @@
 #include <stdio.h>
 #include <sys/syscall.h>
 #include <string.h>
+#include <assert.h>
+#define __USE_MISC // MAP_ANONYMOUS
+#include <sys/mman.h>
 
-struct Context
+struct ChildContext
 {
     int argc;
     char** argv;
@@ -27,9 +30,14 @@ struct Context
     int done;
 };
 
+struct Context
+{
+    struct ChildContext* cc;
+};
+
 static void sandboxed(void* context, struct PageDancer* pd)
 {
-    struct Context* ctx = (struct Context*) context;
+    struct ChildContext* ctx = (struct ChildContext*) context;
     // pd->syscall(__NR_write, 1, "hax\n", 5); // segmentation fault
     // printf("hax\n"); // SIGSYS Bad System Call
     // callPrivileged(); // lose control of the execution.
@@ -47,22 +55,46 @@ static void privilegedMain(void* context, struct PageDancer* pd)
 {
     struct Context* ctx = (struct Context*) context;
 
-    if (ctx->done) {
+    if (ctx->cc->done) {
         char buff[32] = {0};
-        snprintf(buff, 31, "Result is: %d\n", ctx->result);
+        snprintf(buff, 31, "Result is: %d\n", ctx->cc->result);
         pd->syscall(__NR_write, 1, buff, strlen(buff)+1);
         pd->syscall(__NR_exit, 0);
     }
     pd->nextCall = sandboxed;
-    pd->nextCallContext = ctx;
+    pd->nextCallContext = ctx->cc;
     return;
 }
 
 int main(int argc, char** argv)
 {
-    struct Context ctx = {
-        .argc = argc,
-        .argv = argv
-    };
-    PageDancer_begin(privilegedMain, &ctx);
+    if (argc < 3) {
+        if (argc < 1) { return 100; }
+        printf("usage: %s <number> <number>\n"
+               "Adds the numbers together in the sandbox then returns to the\n"
+               "privileged code and prints the result.\n",
+               argv[0]);
+        return 0;
+    }
+    struct Context* ctx = mmap(NULL,
+                               sizeof(struct Context),
+                               PROT_READ | PROT_WRITE,
+                               MAP_PRIVATE | MAP_ANONYMOUS,
+                               -1,
+                               0);
+    assert(ctx != MAP_FAILED);
+
+    struct ChildContext* cc = mmap(NULL,
+                                   sizeof(struct ChildContext),
+                                   PROT_READ | PROT_WRITE,
+                                   MAP_PRIVATE | MAP_ANONYMOUS,
+                                   -1,
+                                   0);
+    assert(cc != MAP_FAILED);
+
+    cc->argc = argc;
+    cc->argv = argv;
+    ctx->cc = cc;
+
+    PageDancer_begin(privilegedMain, ctx, sizeof(struct Context));
 }

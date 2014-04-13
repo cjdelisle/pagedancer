@@ -12,15 +12,21 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#ifndef Syscalls_H
+#define Syscalls_H
 
-<?js file.compilerArgs[file.compilerArgs.indexOf("cpp-output")] = "assembler-with-cpp"; ?>
+#include "PageDancer.h"
 
-#define Processor_ASM_INIT
-#include "Processor.h"
+#include "cjd/util/Linker.h"
+Linker_require("test/Syscalls.c")
 
-#define Processor_MKSYSCALL_NAME Syscall_make
-#define Processor_MKSYSCALL_PARAMS 6
-#include "Processor.h"
+void Syscalls_printf(struct PageDancer* pd, const char* format, ...);
 
-#define Processot_ASM_FINI
-#include "Processor.h"
+void Syscalls_exit(struct PageDancer* pd, int num);
+
+__attribute__((noreturn))
+void Syscalls_abort(struct PageDancer* pd);
+
+int Syscalls_wait4(struct PageDancer* pd, int pid, int* status, int options, void* rusage);
+
+#endif

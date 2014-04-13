@@ -15,6 +15,9 @@
 #ifndef SeccompRules_H
 #define SeccompRules_H
 
+#include "cjd/util/Linker.h"
+Linker_require("SeccompRules.c")
+
 void SeccompRules_install(unsigned char* unprotectLoc,
                           unsigned char* secZone,
                           unsigned long secZoneLen);

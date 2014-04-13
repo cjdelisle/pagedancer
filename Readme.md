@@ -89,4 +89,44 @@ secrets on the stack, you're wize to clear them before entering sandboxed code.
 to exploit it.
 
 
+## Performance
+
+Bad. A benchmark was developed using a number of pages which would be touched by each
+sandboxed child before it returned, the pages were protected and the next child's pages would
+be un-protected. This would run around a circle of *n* children *x* times. Compared to running
+each child in it's own child process with it's own memory space, the performance was 21 times
+worse using PageDancer.
+
+```
+user@toshitba:~/wrk/play/PageDancer$ time ./build_linux/PageDancer_benchmark 100 100 1000
+[100] children -- [100] pages per child -- [1000] cycles
+
+real	0m44.921s
+user	0m6.523s
+sys	0m38.383s
+user@toshitba:~/wrk/play/PageDancer$ time ./build_linux/Benchmark_childProcesses 100 100 1000
+[100] children -- [100] pages per child -- [1000] cycles
+
+real	0m2.124s
+user	0m0.014s
+sys	0m0.028s
+user@toshitba:~/wrk/play/PageDancer$ 
+```
+
+With protecting and un-protecting of the child pages disabled, the performance is comparable
+to full process context switches. The reason for this is not entirely clear, `mprotect()`
+syscall uses the `flush_tlb_range()` function which is intended to flush only the affected
+page entries but if the processor implements `flush_tlb_range()` by flushing everything,
+each `mprotect()` is as costly as a context switch.
+
+
+```
+user@toshitba:~/wrk/play/PageDancer$ time ./build_linux/Benchmark_childProcesses 100 100 1000
+[100] children -- [100] pages per child -- [1000] cycles
+
+real	0m2.118s
+user	0m0.005s
+sys	0m0.035s
+```
+
 
